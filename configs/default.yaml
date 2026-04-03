@@ -1,0 +1,81 @@
+# AI Computer Vision Server Configuration
+
+# Video source configuration
+video:
+  # Source can be: integer (webcam), RTSP URL, or file path
+  source: 0  # Default webcam
+  # source: "rtsp://camera-ip:554/stream"
+  # source: "/path/to/video.mp4"
+  
+  # Frame processing settings
+  width: 1280
+  height: 720
+  fps: 30
+  
+# Detection settings
+detection:
+  # YOLOv8 model variant: n, s, m, l, x (nano to extra-large)
+  model: "yolov8n.pt"
+  
+  # Confidence threshold for detections
+  confidence: 0.5
+  
+  # Only detect persons (class 0 in COCO)
+  classes: [0]
+  
+  # Use GPU if available
+  device: "auto"  # auto, cpu, cuda, or cuda:0
+
+# Tracking configuration
+tracking:
+  # Maximum frames to keep track without detection
+  max_age: 30
+  
+  # Minimum hits before confirming track
+  min_hits: 3
+  
+  # IOU threshold for matching
+  iou_threshold: 0.3
+
+# Dwell-time configuration
+dwell:
+  # Minimum time (seconds) to count as dwelling
+  min_dwell_time: 5.0
+  
+  # Update interval for dwell calculations (seconds)
+  update_interval: 1.0
+
+# Monitoring zones
+zones:
+  - name: "entrance"
+    description: "Main entrance area"
+    # Polygon points as percentage of frame (0-1)
+    points:
+      - [0.0, 0.6]
+      - [0.3, 0.6]
+      - [0.3, 1.0]
+      - [0.0, 1.0]
+    
+  - name: "display_area"
+    description: "Product display zone"
+    points:
+      - [0.4, 0.3]
+      - [0.8, 0.3]
+      - [0.8, 0.7]
+      - [0.4, 0.7]
+
+# API configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins: ["*"]
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Metrics
+metrics:
+  enabled: true
+  port: 9090
