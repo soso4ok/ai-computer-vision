@@ -85,8 +85,10 @@ class KalmanBoxTracker:
     
     def _z_to_bbox(self, z: np.ndarray) -> np.ndarray:
         """Convert [x_center, y_center, scale, ratio] to [x1, y1, x2, y2]."""
-        w = np.sqrt(z[2] * z[3])
-        h = z[2] / w if w > 0 else 0
+        scale = np.maximum(z[2], 1e-6)
+        ratio = np.maximum(z[3], 1e-6)
+        w = np.sqrt(scale * ratio)
+        h = scale / w if w > 0 else 0
         return np.array([
             z[0] - w / 2,
             z[1] - h / 2,

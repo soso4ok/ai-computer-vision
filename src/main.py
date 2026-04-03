@@ -198,12 +198,16 @@ class VisionServer:
         
         fps_start_time = time.time()
         fps_frame_count = 0
+        consecutive_failures = 0
+        max_consecutive_failures = 30
         
         try:
             while self._running.is_set():
                 ret, frame = cap.read()
                 
                 if not ret:
+                    consecutive_failures += 1
+                    
                     # For video files, optionally loop
                     video_config = self.config.get('video', {})
                     source = video_config.get('source', 0)
@@ -211,11 +215,27 @@ class VisionServer:
                     if isinstance(source, str) and Path(source).exists():
                         self.logger.info("Video ended, restarting...")
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        consecutive_failures = 0
                         continue
-                    else:
-                        self.logger.warning("Failed to read frame")
-                        time.sleep(0.1)
-                        continue
+                    
+                    if consecutive_failures >= max_consecutive_failures:
+                        self.logger.error(
+                            f"Failed to read {max_consecutive_failures} consecutive frames. "
+                            f"Video source may be disconnected. Stopping."
+                        )
+                        break
+                    
+                    # Exponential backoff: 0.1s, 0.2s, 0.4s, ... capped at 5s
+                    backoff = min(0.1 * (2 ** (consecutive_failures - 1)), 5.0)
+                    self.logger.warning(
+                        f"Failed to read frame (attempt {consecutive_failures}/{max_consecutive_failures}), "
+                        f"retrying in {backoff:.1f}s"
+                    )
+                    time.sleep(backoff)
+                    continue
+                
+                # Reset failure counter on successful read
+                consecutive_failures = 0
                 
                 # Process frame
                 results = self.process_frame(frame)

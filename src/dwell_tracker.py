@@ -6,7 +6,6 @@ Calculates and monitors how long tracked persons spend in designated zones.
 
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 import time
 import threading
 
@@ -53,6 +52,8 @@ class ZoneDwellStats:
 
 class DwellTracker:
     """Tracks dwell time of persons in configured zones."""
+    
+    MAX_COMPLETED_DWELLS = 10000
     
     def __init__(self, min_dwell_time: float = 5.0):
         """
@@ -126,6 +127,10 @@ class DwellTracker:
                     if record.duration >= self.min_dwell_time:
                         self.completed_dwells.append(record)
                         self.zone_stats[record.zone_name].update_stats(record.duration)
+                        
+                        # Prune oldest records if list exceeds max size
+                        if len(self.completed_dwells) > self.MAX_COMPLETED_DWELLS:
+                            self.completed_dwells = self.completed_dwells[-self.MAX_COMPLETED_DWELLS:]
                     
                     self.zone_stats[record.zone_name].current_visitors -= 1
             

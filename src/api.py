@@ -62,7 +62,7 @@ def create_api(
     get_zones_callback,
     get_zone_dwell_callback,
     get_detections_callback,
-    cors_origins: List[str] = ["*"]
+    cors_origins: Optional[List[str]] = None
 ) -> FastAPI:
     """
     Create the FastAPI application.
@@ -86,7 +86,7 @@ def create_api(
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins,
+        allow_origins=cors_origins if cors_origins is not None else ["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -176,7 +176,12 @@ def create_api(
                 await asyncio.sleep(0.1)  # 10 updates per second
                 
         except WebSocketDisconnect:
-            app.state.ws_connections.remove(websocket)
+            pass
+        except Exception:
+            pass
+        finally:
+            if websocket in app.state.ws_connections:
+                app.state.ws_connections.remove(websocket)
     
     return app
 
@@ -188,11 +193,11 @@ class APIServer:
         self,
         host: str = "0.0.0.0",
         port: int = 8000,
-        cors_origins: List[str] = ["*"]
+        cors_origins: Optional[List[str]] = None
     ):
         self.host = host
         self.port = port
-        self.cors_origins = cors_origins
+        self.cors_origins = cors_origins if cors_origins is not None else ["*"]
         self.app: Optional[FastAPI] = None
         self._stats = {
             "total_detections": 0,
