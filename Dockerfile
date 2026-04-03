@@ -1,6 +1,8 @@
 # Multi-stage build for AI Computer Vision Server
+# Supports ARM64 (Raspberry Pi 4/5) and AMD64
+
 # Stage 1: Build dependencies
-FROM python:3.10-slim as builder
+FROM python:3.11-slim-bookworm AS builder
 
 WORKDIR /build
 
@@ -11,14 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements and install Python packages
 COPY requirements.txt .
-RUN pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels -r requirements.txt
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels -r requirements.txt || \
+    pip wheel --no-cache-dir --wheel-dir /build/wheels -r requirements.txt
 
 # Stage 2: Runtime image
-FROM python:3.10-slim
+FROM python:3.11-slim-bookworm
 
 LABEL maintainer="AI Vision Team"
 LABEL description="AI Computer Vision Server for customer detection and dwell-time tracking"
-LABEL version="1.0.0"
+LABEL version="1.1.0"
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -28,7 +31,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (includes libcamera for RPi Camera support)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
@@ -37,6 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     ffmpeg \
     curl \
+    # Raspberry Pi camera support (harmless on non-RPi)
+    libcamera0 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -59,9 +64,9 @@ USER appuser
 EXPOSE 8000 9090
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default command
+# Default command — auto-detects platform
 ENTRYPOINT ["python", "src/main.py"]
 CMD ["--config", "configs/default.yaml"]

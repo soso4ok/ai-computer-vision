@@ -2,6 +2,7 @@
 AI Computer Vision Server - Main Entry Point
 
 Processes video input for customer detection and dwell-time tracking.
+Supports USB webcams and Raspberry Pi Camera Module (via picamera2).
 """
 
 import argparse
@@ -18,11 +19,58 @@ import numpy as np
 import yaml
 from threading import Thread, Event
 
-from detector import PersonDetector
+from detector import PersonDetector, is_arm_platform
 from tracker import ObjectTracker
 from dwell_tracker import DwellTracker
 from zone_manager import ZoneManager
 from api import APIServer
+
+
+class PiCameraSource:
+    """Wrapper for Raspberry Pi Camera Module via picamera2."""
+    
+    def __init__(self, width: int = 640, height: int = 480, fps: int = 15):
+        try:
+            from picamera2 import Picamera2
+        except ImportError:
+            raise RuntimeError(
+                "picamera2 is not installed. Install with: "
+                "sudo apt install -y python3-picamera2"
+            )
+        
+        self.picam = Picamera2()
+        config = self.picam.create_preview_configuration(
+            main={"size": (width, height), "format": "RGB888"},
+            controls={"FrameRate": fps},
+        )
+        self.picam.configure(config)
+        self.picam.start()
+        self._opened = True
+    
+    def isOpened(self) -> bool:
+        return self._opened
+    
+    def read(self):
+        """Read a frame from the Pi camera. Returns (success, frame_bgr)."""
+        try:
+            frame_rgb = self.picam.capture_array()
+            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            return True, frame_bgr
+        except Exception:
+            return False, None
+    
+    def release(self):
+        if self._opened:
+            self.picam.stop()
+            self._opened = False
+    
+    def set(self, prop, value):
+        """Compatibility stub for cv2.VideoCapture.set()."""
+        pass
+    
+    def get(self, prop):
+        """Compatibility stub for cv2.VideoCapture.get()."""
+        return 0
 
 
 class VisionServer:
@@ -35,6 +83,9 @@ class VisionServer:
         
         self.logger = logging.getLogger(__name__)
         self.logger.info("Initializing AI Computer Vision Server")
+        
+        if is_arm_platform():
+            self.logger.info("Raspberry Pi / ARM platform detected")
         
         # Initialize components
         self._init_components()
@@ -71,7 +122,8 @@ class VisionServer:
         self.detector = PersonDetector(
             model_path=det_config.get('model', 'yolov8n.pt'),
             confidence=det_config.get('confidence', 0.5),
-            device=det_config.get('device', 'auto')
+            device=det_config.get('device', 'auto'),
+            use_ncnn=det_config.get('use_ncnn', False),
         )
         
         # Object tracker
@@ -100,12 +152,21 @@ class VisionServer:
         self.logger.info(f"Initialized with {len(zones_config)} monitoring zones")
     
     def _open_video_source(self):
-        """Open the video source."""
+        """Open the video source (USB webcam, RTSP, file, or Pi Camera)."""
         video_config = self.config.get('video', {})
         source = video_config.get('source', 0)
+        width = video_config.get('width', 640)
+        height = video_config.get('height', 480)
+        fps = video_config.get('fps', 30)
         
         self.logger.info(f"Opening video source: {source}")
         
+        # Raspberry Pi Camera Module
+        if isinstance(source, str) and source.lower() in ("picamera", "picamera2", "pi"):
+            self.logger.info("Using Raspberry Pi Camera Module via picamera2")
+            return PiCameraSource(width=width, height=height, fps=fps)
+        
+        # OpenCV video source (webcam index, RTSP URL, or file)
         cap = cv2.VideoCapture(source)
         
         if not cap.isOpened():
@@ -191,8 +252,12 @@ class VisionServer:
         cap = self._open_video_source()
         
         # Warm up detector
+        video_config = self.config.get('video', {})
+        warmup_h = video_config.get('height', 480)
+        warmup_w = video_config.get('width', 640)
+        
         self.logger.info("Warming up detector...")
-        self.detector.warmup()
+        self.detector.warmup(input_shape=(warmup_h, warmup_w, 3))
         
         self.logger.info("Starting video processing loop")
         
@@ -200,6 +265,10 @@ class VisionServer:
         fps_frame_count = 0
         consecutive_failures = 0
         max_consecutive_failures = 30
+        
+        # Frame skip for low-power devices
+        frame_skip = self.config.get('video', {}).get('frame_skip', 1)
+        raw_frame_count = 0
         
         try:
             while self._running.is_set():
@@ -209,7 +278,6 @@ class VisionServer:
                     consecutive_failures += 1
                     
                     # For video files, optionally loop
-                    video_config = self.config.get('video', {})
                     source = video_config.get('source', 0)
                     
                     if isinstance(source, str) and Path(source).exists():
@@ -236,6 +304,11 @@ class VisionServer:
                 
                 # Reset failure counter on successful read
                 consecutive_failures = 0
+                
+                # Frame skip — only process every Nth frame
+                raw_frame_count += 1
+                if frame_skip > 1 and (raw_frame_count % frame_skip) != 0:
+                    continue
                 
                 # Process frame
                 results = self.process_frame(frame)
@@ -304,18 +377,32 @@ def main():
     parser.add_argument(
         "--source", "-s",
         type=str,
-        help="Override video source (webcam index, RTSP URL, or file path)"
+        help="Override video source (webcam index, RTSP URL, file path, or 'picamera')"
     )
     parser.add_argument(
         "--port", "-p",
         type=int,
         help="Override API port"
     )
+    parser.add_argument(
+        "--raspberry", "--rpi",
+        action="store_true",
+        help="Use Raspberry Pi optimized config (configs/raspberry.yaml)"
+    )
     
     args = parser.parse_args()
     
+    # Use RPi config if --raspberry flag is set
+    config_path = args.config
+    if args.raspberry:
+        rpi_config = Path("configs/raspberry.yaml")
+        if rpi_config.exists():
+            config_path = str(rpi_config)
+        else:
+            print(f"Warning: {rpi_config} not found, using {config_path}")
+    
     # Create and run server
-    server = VisionServer(args.config)
+    server = VisionServer(config_path)
     
     # Apply command-line overrides
     if args.source is not None:

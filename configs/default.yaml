@@ -11,6 +11,9 @@ video:
   width: 1280
   height: 720
   fps: 30
+
+  # Process every Nth frame (1 = no skip, 2 = every other frame)
+  frame_skip: 1
   
 # Detection settings
 detection:
